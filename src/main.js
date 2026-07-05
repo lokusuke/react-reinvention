@@ -18,8 +18,7 @@
 //   },
 // };
 
-// createElement関数の自作
-const createElement = (type, props, ...children) => {
+function createElement(type, props, ...children) {
   return {
     type,
     props: {
@@ -29,10 +28,9 @@ const createElement = (type, props, ...children) => {
       ),
     },
   };
-};
+}
 
-// createTextElement関数の自作
-const createTextElement = (text) => {
+function createTextElement(text) {
   return {
     type: "TEXT_ELEMENT",
     props: {
@@ -40,26 +38,109 @@ const createTextElement = (text) => {
       children: [],
     },
   };
-};
+}
 
-const render = (element, container) => {
-  // テキスト要素か否かで分岐
+function createDom(fiber) {
   const dom =
-    element.type === "TEXT_ELEMENT"
-      ? document.createTextNode(element.props.nodeValue)
-      : document.createElement(element.type);
+    fiber.type == "TEXT_ELEMENT"
+      ? document.createTextNode(fiber.props.nodeValue)
+      : document.createElement(fiber.type);
 
-  // propsのキーを取得して、childrenでなければ属性
-  Object.keys(element.props)
-    .filter((key) => key !== "children")
+  const isProperty = (key) => key !== "children";
+  Object.keys(fiber.props)
+    .filter(isProperty)
     .forEach((name) => {
-      dom[name] = element.props[name];
+      dom[name] = fiber.props[name];
     });
 
-  element.props.children.forEach((child) => render(child, dom));
+  return dom;
+}
 
-  container.appendChild(dom);
-};
+// 追加
+function commitRoot() {
+  commitWork(wipRoot.child);
+  wipRoot = null;
+}
+
+// 追加
+function commitWork(fiber) {
+  if (!fiber) {
+    return;
+  }
+  const domParent = fiber.parent.dom;
+  domParent.appendChild(fiber.dom);
+  commitWork(fiber.child);
+  commitWork(fiber.sibling);
+}
+
+function render(element, container) {
+  wipRoot = {
+    dom: container,
+    props: {
+      children: [element],
+    },
+  };
+  nextUnitOfWork = wipRoot;
+}
+
+let nextUnitOfWork = null;
+let wipRoot = null;
+
+function workLoop(deadline) {
+  let shouldYield = false;
+  while (nextUnitOfWork && !shouldYield) {
+    nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
+    shouldYield = deadline.timeRemaining() < 1;
+  }
+  requestIdleCallback(workLoop);
+
+  if (!nextUnitOfWork && wipRoot) {
+    commitRoot();
+  }
+}
+
+requestIdleCallback(workLoop);
+
+function performUnitOfWork(fiber) {
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+
+  const elements = fiber.props.children;
+  let index = 0;
+  let prevSibling = null;
+
+  while (index < elements.length) {
+    const element = elements[index];
+
+    const newFiber = {
+      type: element.type,
+      props: element.props,
+      parent: fiber,
+      dom: null,
+    };
+
+    if (index === 0) {
+      fiber.child = newFiber;
+    } else {
+      prevSibling.sibling = newFiber;
+    }
+
+    prevSibling = newFiber;
+    index++;
+  }
+
+  if (fiber.child) {
+    return fiber.child;
+  }
+  let nextFiber = fiber;
+  while (nextFiber) {
+    if (nextFiber.sibling) {
+      return nextFiber.sibling;
+    }
+    nextFiber = nextFiber.parent;
+  }
+}
 
 const MyReact = {
   createElement,
